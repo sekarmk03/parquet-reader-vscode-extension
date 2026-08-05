@@ -5,6 +5,14 @@
   "version": "0.0.1",
   "publisher": "sekar",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sekarmk03/parquet-reader-vscode-extension.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sekarmk03/parquet-reader-vscode-extension/issues"
+  },
+  "homepage": "https://github.com/sekarmk03/parquet-reader-vscode-extension#readme",
   "engines": {
     "vscode": "^1.90.0"
   },

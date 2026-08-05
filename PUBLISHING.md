@@ -3,29 +3,29 @@
 Steps to get this extension onto the VS Code Marketplace. Work through them in order — the
 first two are blockers.
 
-## 1. Host the repository (blocker for the screenshots)
+## 1. Host the repository — done
 
 `README.md` references images with relative paths (`images/data-tab.png`). The Marketplace
-only renders images served over HTTPS, so `vsce` rewrites relative paths at package time —
-but it can only do that if it knows the repository URL. Without one, `vsce package` fails:
+only renders images served over HTTPS, so `vsce` rewrites those paths at package time — but it
+can only do that if it knows the repository URL. Without one, `vsce package` fails outright:
 
 ```
 ERROR  Couldn't detect the repository where this extension is published.
 The image 'images/data-tab.png' will be broken in README.md.
 ```
 
-Push this folder to a public repository, then add to `package.json`:
+`package.json` now points at https://github.com/sekarmk03/parquet-reader-vscode-extension,
+and packaging rewrites the images to
+`https://github.com/sekarmk03/parquet-reader-vscode-extension/raw/HEAD/images/…`.
 
-```json
-"repository": { "type": "git", "url": "https://github.com/<user>/parquet-table-viewer.git" },
-"bugs": { "url": "https://github.com/<user>/parquet-table-viewer/issues" },
-"homepage": "https://github.com/<user>/parquet-table-viewer#readme"
-```
+Two things this depends on, worth rechecking if the images ever break:
 
-The `images/` folder must be committed — it is excluded from the `.vsix` on purpose, since the
-Marketplace loads those images from the repository rather than from the package.
+- **`images/` must stay committed and public.** It is excluded from the `.vsix` on purpose —
+  the Marketplace loads those files from the repository, not from the package.
+- **`raw/HEAD` follows the default branch.** Renaming or unpublishing that branch breaks every
+  screenshot on the listing.
 
-GitHub and GitLab URLs are detected automatically. If you host the images elsewhere, pass the
+GitHub and GitLab URLs are detected automatically. To host the images somewhere else, pass the
 base URLs explicitly instead:
 
 ```bash
