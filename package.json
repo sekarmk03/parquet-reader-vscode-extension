@@ -1,0 +1,75 @@
+{
+  "name": "parquet-table-viewer",
+  "displayName": "Parquet Table Viewer",
+  "description": "View .parquet files as a readable table with column summary",
+  "version": "0.0.1",
+  "publisher": "sekar",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Visualization",
+    "Data Science"
+  ],
+  "keywords": [
+    "parquet",
+    "columnar",
+    "data",
+    "table viewer",
+    "s3",
+    "spark",
+    "pyarrow"
+  ],
+  "galleryBanner": {
+    "color": "#1f1f1f",
+    "theme": "dark"
+  },
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "parquetViewer.openUrl",
+        "title": "Open Parquet from URL…",
+        "category": "Parquet"
+      }
+    ],
+    "customEditors": [
+      {
+        "viewType": "parquetViewer.table",
+        "displayName": "Parquet Table",
+        "selector": [
+          {
+            "filenamePattern": "*.parquet"
+          },
+          {
+            "filenamePattern": "*.pq"
+          }
+        ],
+        "priority": "default"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "sample": "node test/make-sample.mjs",
+    "demo": "node test/make-demo.mjs",
+    "smoke": "node esbuild.mjs --smoke && node dist/smoke.js",
+    "package": "node esbuild.mjs --production && vsce package"
+  },
+  "dependencies": {
+    "hyparquet": "^1.27.1",
+    "hyparquet-compressors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "@types/vscode": "~1.90.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.1",
+    "hyparquet-writer": "^0.16.5",
+    "typescript": "^7.0.2"
+  }
+}
