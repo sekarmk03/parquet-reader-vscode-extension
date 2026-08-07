@@ -32,14 +32,20 @@ base URLs explicitly instead:
 npx vsce package --baseContentUrl https://<host>/<path>/ --baseImagesUrl https://<host>/<path>/
 ```
 
-## 2. Create a publisher
+## 2. Publisher
 
-The `publisher` field is currently `sekar`. It must match a publisher you own.
+`package.json` declares `"publisher": "sekarmk03"`, which makes the Marketplace ID
+`sekarmk03.parquet-reader`. That ID is not yet taken. The field must match the publisher
+account the extension is uploaded under, and it cannot be changed after the first publish
+without republishing under a new ID.
 
-1. Create an Azure DevOps organisation: https://dev.azure.com
-2. Create a Personal Access Token with **Marketplace → Manage** scope, all organisations
-3. Create the publisher: https://marketplace.visualstudio.com/manage
-4. Log in locally: `npx vsce login <publisher>`
+Uploading the `.vsix` by hand (step 6) needs nothing further. Publishing from the terminal
+additionally needs a Personal Access Token from Azure DevOps (https://dev.azure.com) with the
+**Marketplace → Manage** scope, scoped to **all accessible organizations**:
+
+```bash
+npx vsce login sekarmk03
+```
 
 ## 3. Add an icon (optional but recommended)
 
@@ -80,18 +86,31 @@ Check the file list `vsce` prints. It should contain `dist/extension.js`, `media
 Install the `.vsix` locally and open a real file before publishing:
 
 ```bash
-code --install-extension parquet-table-viewer-0.0.1.vsix
+code --install-extension parquet-reader-0.0.1.vsix
 ```
 
 ## 6. Publish
+
+Upload `parquet-reader-0.0.1.vsix` at https://marketplace.visualstudio.com/manage
+under the `sekarmk03` publisher — **New extension → Visual Studio Code**.
+
+Nothing about the package depends on how it is uploaded: the README image links were already
+rewritten to absolute GitHub URLs at package time, and the manifest already carries
+`Publisher="sekarmk03"`. It only has to be uploaded under that same publisher account.
+
+The alternative, if you ever want it from the terminal, needs the PAT from step 2:
 
 ```bash
 npx vsce publish            # publishes the current version
 npx vsce publish patch      # or: bump 0.0.1 -> 0.0.2 first, then publish
 ```
 
-The listing appears within a few minutes. Verify that the screenshots actually render on the
-Marketplace page — a broken image there is almost always the repository URL from step 1.
+Either way the listing takes a few minutes to verify before it goes live. Then check that the
+four screenshots actually render on the Marketplace page — a broken image there is almost
+always the repository URL from step 1.
+
+A version can only be uploaded once. Any change, however small, needs the `version` field
+bumped and a fresh `npm run package`.
 
 ## Releasing later versions
 

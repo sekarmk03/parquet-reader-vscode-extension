@@ -1,9 +1,9 @@
 {
-  "name": "parquet-table-viewer",
-  "displayName": "Parquet Table Viewer",
+  "name": "parquet-reader",
+  "displayName": "Parquet Reader",
   "description": "View .parquet files as a readable table with column summary",
   "version": "0.0.1",
-  "publisher": "sekar",
+  "publisher": "sekarmk03",
   "license": "MIT",
   "repository": {
     "type": "git",

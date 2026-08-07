@@ -1,4 +1,4 @@
-# Parquet Table Viewer
+# Parquet Reader
 
 Open `.parquet` files in VS Code and read them as a table — column types, per-column
 statistics, and full nested values, without leaving the editor and without loading the whole
