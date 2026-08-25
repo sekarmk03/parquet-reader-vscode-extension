@@ -7,8 +7,6 @@ import { compressors } from 'hyparquet-compressors'
 import type { AsyncBuffer, FileMetaData, SchemaElement, SchemaTree } from 'hyparquet'
 import type { ColumnSummary, DataColumn, FileInfo } from './types'
 
-export const PAGE_SIZE = 100
-
 export interface ParquetHandle {
   file: AsyncBuffer
   metadata: FileMetaData
@@ -38,19 +36,35 @@ export async function openParquet(file: AsyncBuffer): Promise<ParquetHandle> {
  */
 const READ_OPTIONS = { compressors, useOffsetIndex: true }
 
-export async function readPage(h: ParquetHandle, page: number): Promise<string[][]> {
-  const rowStart = page * PAGE_SIZE
-  if (rowStart >= h.totalRows) return []
-  const rowEnd = Math.min(rowStart + PAGE_SIZE, h.totalRows)
+/**
+ * Raw values, one array per row, in dataColumns order. Everything that reads rows
+ * goes through here — the grid formats them, sorting compares them untouched.
+ */
+export async function readRowValues(
+  h: ParquetHandle,
+  rowStart: number,
+  rowEnd: number,
+): Promise<unknown[][]> {
+  if (rowStart >= h.totalRows || rowStart >= rowEnd) return []
 
   const rows = await parquetReadObjects({
     file: h.file,
     metadata: h.metadata,
     ...READ_OPTIONS,
     rowStart,
-    rowEnd,
+    rowEnd: Math.min(rowEnd, h.totalRows),
   })
-  return rows.map(row => h.dataColumns.map(c => formatCell(row[c.name])))
+  return rows.map(row => h.dataColumns.map(c => row[c.name]))
+}
+
+export async function readPage(
+  h: ParquetHandle,
+  page: number,
+  pageSize: number,
+): Promise<string[][]> {
+  const rowStart = page * pageSize
+  const values = await readRowValues(h, rowStart, rowStart + pageSize)
+  return values.map(row => row.map(formatCell))
 }
 
 // ── read one cell, in full ───────────────────────────────────────────────────
@@ -118,10 +132,22 @@ function truncate(s: string): string {
 function buildDataColumns(md: FileMetaData): DataColumn[] {
   return parquetSchema(md).children.map(node => {
     const described = describeType(node.element)
+    // A group has no physical type of its own; a repeated field reads back as an array.
+    const nested = !node.element.type
+    const repeated = node.element.repetition_type === 'REPEATED'
+    const type = nested ? groupType(node) : described.label
     return {
       name: node.element.name,
-      type: node.element.type ? described.label : groupType(node),
+      type,
       numeric: described.numeric,
+      sortable: !nested && !repeated,
+      // Worded per case: "STRING columns cannot be sorted" would be a lie about a
+      // repeated STRING, since a plain STRING column sorts fine.
+      unsortableReason: nested
+        ? `A ${type} column holds a nested value, so there is no single value to order rows by.`
+        : repeated
+          ? `This column repeats — each row holds a list of ${type}, not one value to order by.`
+          : undefined,
     }
   })
 }

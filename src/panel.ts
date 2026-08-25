@@ -1,15 +1,26 @@
 import * as vscode from 'vscode'
-import {
-  PAGE_SIZE,
-  ParquetHandle,
-  buildInfo,
-  buildSchema,
-  openParquet,
-  readCell,
-  readPage,
-} from './parquet'
+import { ParquetHandle, buildInfo, buildSchema, openParquet } from './parquet'
 import { openSource, sourceLabel } from './source'
-import type { FromWebview, ToWebview } from './types'
+import {
+  RowView,
+  buildSortedView,
+  effectivePageSize,
+  identityView,
+  readViewCell,
+  readViewPage,
+  sortRefusal,
+  totalPages,
+} from './view'
+import type { FromWebview, SortState, ToWebview, ViewState } from './types'
+
+/** Both settings live under one section so a single change event covers them. */
+function readSettings() {
+  const config = vscode.workspace.getConfiguration('parquetReader')
+  return {
+    pageSize: config.get<number>('pageSize', 100),
+    sortCellBudget: config.get<number>('sortCellBudget', 500_000),
+  }
+}
 
 /**
  * Wires one webview panel to one parquet source — a local path or a remote URL.
@@ -25,25 +36,67 @@ export async function attachPanel(
   panel.webview.html = buildHtml(panel.webview, mediaRoot)
 
   let handle: ParquetHandle | undefined
+  let view: RowView | undefined
+  let page = 0
+  /** The size the page on screen was built with, so a change can keep the same first row. */
+  let shownPageSize = 0
   const post = (message: ToWebview) => panel.webview.postMessage(message)
 
+  const describeState = (): ViewState => {
+    const settings = readSettings()
+    const columns = handle?.dataColumns.length ?? 1
+    const reason = handle ? sortRefusal(handle, settings.sortCellBudget) : undefined
+    return {
+      pageSize: effectivePageSize(settings.pageSize, columns),
+      pageSizeSetting: settings.pageSize,
+      sortable: reason === undefined,
+      sortDisabledReason: reason,
+      sort: view?.kind === 'materialized' ? view.sort : null,
+    }
+  }
+
   const sendPage = async (requested: number) => {
-    if (!handle) return
-    const totalPages = Math.max(1, Math.ceil(handle.totalRows / PAGE_SIZE))
-    const page = Math.min(Math.max(0, requested), totalPages - 1)
+    if (!handle || !view) return
+    const state = describeState()
+    const pages = totalPages(view, state.pageSize)
+    page = Math.min(Math.max(0, requested), pages - 1)
+    shownPageSize = state.pageSize
     post({
       type: 'page',
-      rows: await readPage(handle, page),
+      rows: await readViewPage(handle, view, page, state.pageSize),
       page,
-      totalPages,
-      rowOffset: page * PAGE_SIZE,
+      totalPages: pages,
+      rowOffset: page * state.pageSize,
+      state,
     })
   }
+
+  // A different page size changes which rows belong on the current page, so the page
+  // is redrawn — landing on whichever page now holds the row that was at the top.
+  const settingsWatcher = vscode.workspace.onDidChangeConfiguration(async event => {
+    if (!event.affectsConfiguration('parquetReader') || !handle) return
+    try {
+      const firstRow = page * shownPageSize
+      const next = describeState()
+      // Sorting may have just been forbidden by a lower budget; fall back to file order.
+      if (view?.kind === 'materialized' && !next.sortable) {
+        view = identityView(handle)
+        page = 0
+      } else {
+        page = Math.floor(firstRow / next.pageSize)
+      }
+      await sendPage(page)
+    } catch (error) {
+      post({ type: 'error', message: describeError(error) })
+    }
+  })
+  panel.onDidDispose(() => settingsWatcher.dispose())
 
   panel.webview.onDidReceiveMessage(async (message: FromWebview) => {
     try {
       if (message.type === 'ready') {
         handle = await openParquet(await openSource(source))
+        view = identityView(handle)
         post({
           type: 'init',
           source,
@@ -54,8 +107,15 @@ export async function attachPanel(
         await sendPage(0)
       } else if (message.type === 'requestPage') {
         await sendPage(message.page)
-      } else if (message.type === 'requestCell') {
+      } else if (message.type === 'pageSize') {
+        // Writing the setting is the whole action: the change event redraws the page.
+        await savePageSize(message.value)
+      } else if (message.type === 'sort') {
         if (!handle) return
+        view = await resolveSort(handle, message, describeState())
+        await sendPage(0)
+      } else if (message.type === 'requestCell') {
+        if (!handle || !view) return
         const column = handle.dataColumns[message.col]
         if (!column) return
         post({
@@ -63,7 +123,7 @@ export async function attachPanel(
           row: message.row,
           col: message.col,
           column: column.name,
-          value: await readCell(handle, message.row, message.col),
+          value: await readViewCell(handle, view, message.row, message.col),
         })
       } else if (message.type === 'copy') {
         // The host clipboard works regardless of webview focus rules.
@@ -73,6 +133,38 @@ export async function attachPanel(
       post({ type: 'error', message: describeError(error) })
     }
   })
+}
+
+/**
+ * Writes back to wherever the value is already defined, so a workspace override is
+ * updated in place rather than shadowed by a user-level one that never takes effect.
+ */
+async function savePageSize(value: number): Promise<void> {
+  const config = vscode.workspace.getConfiguration('parquetReader')
+  const declared = config.inspect<number>('pageSize')
+  const target =
+    declared?.workspaceFolderValue !== undefined
+      ? vscode.ConfigurationTarget.WorkspaceFolder
+      : declared?.workspaceValue !== undefined
+        ? vscode.ConfigurationTarget.Workspace
+        : vscode.ConfigurationTarget.Global
+  await config.update('pageSize', value, target)
+}
+
+/**
+ * The webview disables what it must not offer, but it is a separate process:
+ * every guard is re-checked here before a whole file is pulled into memory.
+ */
+async function resolveSort(
+  handle: ParquetHandle,
+  request: { column: number | null; dir: 'asc' | 'desc' },
+  state: ViewState,
+): Promise<RowView> {
+  if (request.column === null) return identityView(handle)
+  const column = handle.dataColumns[request.column]
+  if (!column?.sortable || !state.sortable) return identityView(handle)
+  const sort: SortState = { column: request.column, dir: request.dir }
+  return buildSortedView(handle, sort)
 }
 
 function describeError(error: unknown): string {
@@ -126,7 +218,18 @@ function buildHtml(webview: vscode.Webview, mediaRoot: vscode.Uri): string {
   </nav>
 
   <main>
-    <div id="pane-data" class="pane"><div class="scroll"><table id="tbl-data"></table></div></div>
+    <div id="pane-data" class="pane">
+      <div id="toolbar">
+        <input id="search" type="search" placeholder="Search this page…" spellcheck="false"
+               autocomplete="off" aria-label="Search the rows on this page">
+        <span id="searchcount" class="dim"></span>
+        <span class="spacer"></span>
+        <span id="notice" class="hidden"></span>
+        <span id="sortstate" class="dim"></span>
+        <button id="sortclear" class="hidden" type="button">Clear sort</button>
+      </div>
+      <div class="scroll"><table id="tbl-data"></table></div>
+    </div>
     <div id="pane-schema" class="pane hidden"><div class="scroll"><table id="tbl-schema"></table></div></div>
   </main>
 
@@ -145,6 +248,11 @@ function buildHtml(webview: vscode.Webview, mediaRoot: vscode.Uri): string {
     <span id="pageinfo" class="dim"></span>
     <button id="next" type="button" disabled>Next ▶</button>
     <span id="range" class="dim"></span>
+    <span class="spacer"></span>
+    <span id="pagesize" class="dim"></span>
+    <label id="rowsperpage">Rows per page
+      <select id="pagesizepick" aria-label="Rows per page"></select>
+    </label>
   </footer>
 
   <script nonce="${nonce}" src="${asset('main.js')}"></script>

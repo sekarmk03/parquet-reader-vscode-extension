@@ -8,7 +8,6 @@ import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
 import { isRemote, openSource, sourceLabel } from './source'
 import {
-  PAGE_SIZE,
   buildInfo,
   buildSchema,
   formatCell,
@@ -18,8 +17,21 @@ import {
   readCell,
   readPage,
 } from './parquet'
+import {
+  buildSortedView,
+  effectivePageSize,
+  identityView,
+  readViewCell,
+  readViewPage,
+  sortRefusal,
+  totalPages,
+} from './view'
 
 const fixtures = join(__dirname, '..', 'test')
+
+/** What package.json ships as the default; the host reads it from settings. */
+const PAGE_SIZE = 100
+
 let failures = 0
 
 function check(label: string, condition: boolean, actual?: unknown) {
@@ -78,7 +90,7 @@ async function main() {
   const handle = await openParquet(await openSource(path))
   const info = buildInfo(handle, 'sample.parquet')
   const schema = buildSchema(handle)
-  const page0 = await readPage(handle, 0)
+  const page0 = await readPage(handle, 0, PAGE_SIZE)
 
   check('250 rows', info.totalRows === '250', info.totalRows)
   check('5 columns', info.totalCols === 5, info.totalCols)
@@ -121,23 +133,23 @@ async function main() {
   check('sizes formatted', /\d (B|KB|MB)/.test(idCol.compressed), idCol.compressed)
 
   console.log('\npagination')
-  const totalPages = Math.ceil(handle.totalRows / PAGE_SIZE)
-  const last = await readPage(handle, totalPages - 1)
-  check('3 pages for 250 rows', totalPages === 3, totalPages)
+  const pages = Math.ceil(handle.totalRows / PAGE_SIZE)
+  const last = await readPage(handle, pages - 1, PAGE_SIZE)
+  check('3 pages for 250 rows', pages === 3, pages)
   check('last page holds the remainder', last.length === 50, last.length)
-  check('page 1 starts at row 101', (await readPage(handle, 1))[0][0] === '101')
-  check('past the end returns nothing', (await readPage(handle, 99)).length === 0)
+  check('page 1 starts at row 101', (await readPage(handle, 1, PAGE_SIZE))[0][0] === '101')
+  check('past the end returns nothing', (await readPage(handle, 99, PAGE_SIZE)).length === 0)
 
   console.log('\nempty.parquet')
   const emptyHandle = await openParquet(await openSource(join(fixtures, 'empty.parquet')))
   check('reports 0 rows', emptyHandle.totalRows === 0, emptyHandle.totalRows)
   check('columns still known', emptyHandle.dataColumns.length === 2)
-  check('no rows returned', (await readPage(emptyHandle, 0)).length === 0)
+  check('no rows returned', (await readPage(emptyHandle, 0, PAGE_SIZE)).length === 0)
   check('schema still builds', buildSchema(emptyHandle).length === 2)
 
   console.log('\nnested.parquet — cell detail')
   const nested = await openParquet(await openSource(join(fixtures, 'nested.parquet')))
-  const nestedRows = await readPage(nested, 0)
+  const nestedRows = await readPage(nested, 0, PAGE_SIZE)
   const gridCell = nestedRows[0][1]
   const fullCell = await readCell(nested, 0, 1)
 
@@ -176,7 +188,7 @@ async function main() {
     const remote = await openParquet(await openSource(`${ranged.url}/sample.parquet`))
     const remoteInfo = buildInfo(remote, sourceLabel(`${ranged.url}/sample.parquet`))
     const afterOpen = ranged.requests()
-    const remotePage = await readPage(remote, 1)
+    const remotePage = await readPage(remote, 1, PAGE_SIZE)
 
     check('reads over http', remote.totalRows === 250, remote.totalRows)
     check('size comes from Content-Range', remoteInfo.fileSize === humanBytes(bytes.length),
@@ -205,6 +217,98 @@ async function main() {
   } finally {
     await wholeFileOnly.close()
   }
+
+  console.log('\npage size')
+  // Reading costs the same at any page size; rendering does not. See SPEC-v2.md §8.
+  check('the default passes through on a narrow file', effectivePageSize(100, 5) === 100)
+  check('1000 rows is allowed at 4 columns', effectivePageSize(1000, 4) === 1000)
+  check('60 columns lowers it to 333', effectivePageSize(1000, 60) === 333,
+    effectivePageSize(1000, 60))
+  check('a very wide file still gets the floor', effectivePageSize(1000, 5000) === 25,
+    effectivePageSize(1000, 5000))
+  check('below the floor is raised', effectivePageSize(1, 5) === 25, effectivePageSize(1, 5))
+  check('above the ceiling is capped', effectivePageSize(99999, 4) === 1000,
+    effectivePageSize(99999, 4))
+
+  console.log('\nsortable columns')
+  check('a scalar column is sortable', nested.dataColumns[0].sortable === true)
+  check('a nested column is not', nested.dataColumns[1].sortable === false)
+  check('every sample column is sortable', handle.dataColumns.every(c => c.sortable))
+  // A column the user cannot sort has to say why; silence reads as a broken header.
+  const nestedReason = nested.dataColumns[1].unsortableReason ?? ''
+  check('a nested column explains itself', nestedReason.length > 0, nestedReason)
+  check('the explanation names the type', nestedReason.includes(nested.dataColumns[1].type),
+    nestedReason)
+  check('a sortable column carries no excuse',
+    nested.dataColumns[0].unsortableReason === undefined)
+  check('no sample column carries one',
+    handle.dataColumns.every(c => c.unsortableReason === undefined))
+
+  console.log('\nsort budget')
+  const refusal = sortRefusal(handle, 10) ?? ''
+  check('a small file may sort', sortRefusal(handle, 500_000) === undefined)
+  check('over budget is refused', refusal.length > 0, refusal)
+  check('the refusal names the file and the limit',
+    refusal.includes('1,250') && refusal.includes('10'), refusal)
+  check('a zero budget turns sorting off', sortRefusal(handle, 0) !== undefined)
+
+  console.log('\nsorting')
+  const identity = identityView(handle)
+  const idAsc = await buildSortedView(handle, { column: 0, dir: 'asc' })
+  const idDesc = await buildSortedView(handle, { column: 0, dir: 'desc' })
+  const firstPage = (view: typeof identity) => readViewPage(handle, view, 0, PAGE_SIZE)
+  const lastPage = (view: typeof identity) =>
+    readViewPage(handle, view, totalPages(view, PAGE_SIZE) - 1, PAGE_SIZE)
+
+  check('the identity view reads exactly like a plain page',
+    JSON.stringify(await firstPage(identity)) === JSON.stringify(page0))
+  check('sorting keeps every row', idAsc.total === 250, idAsc.total)
+
+  const ascTop = await firstPage(idAsc)
+  // As strings these would run 1, 10, 100 — proof the sort compared raw values.
+  check('INT64 ascending is numeric, not lexicographic',
+    ascTop.slice(0, 3).map(r => r[0]).join(',') === '1,2,3', ascTop.slice(0, 3).map(r => r[0]))
+  check('INT64 descending starts at the largest', (await firstPage(idDesc))[0][0] === '250')
+  check('a sorted middle page starts where it should',
+    (await readViewPage(handle, idAsc, 1, PAGE_SIZE))[0][0] === '101')
+  const ascEnd = await lastPage(idAsc)
+  check('a sorted last page holds the remainder', ascEnd.length === 50, ascEnd.length)
+  check('a sorted last page ends at the largest', ascEnd[ascEnd.length - 1][0] === '250')
+
+  const nameAsc = await buildSortedView(handle, { column: 1, dir: 'asc' })
+  const nameDesc = await buildSortedView(handle, { column: 1, dir: 'desc' })
+  const tailValue = async (view: typeof identity, col: number) => {
+    const rows = await lastPage(view)
+    return rows[rows.length - 1][col]
+  }
+  check('STRING ascending is lexicographic', (await firstPage(nameAsc))[0][1] === 'user_1',
+    (await firstPage(nameAsc))[0][1])
+  check('STRING descending reverses it', (await firstPage(nameDesc))[0][1] === 'user_99',
+    (await firstPage(nameDesc))[0][1])
+  // NULL is the absence of a value, not the smallest one — it parks last either way.
+  check('NULLs sort last ascending', (await tailValue(nameAsc, 1)) === 'NULL')
+  check('NULLs sort last descending too', (await tailValue(nameDesc, 1)) === 'NULL')
+
+  const scoreAsc = await buildSortedView(handle, { column: 2, dir: 'asc' })
+  check('DOUBLE ascending starts at the smallest', (await firstPage(scoreAsc))[0][2] === '1.37',
+    (await firstPage(scoreAsc))[0][2])
+  const boolAsc = await buildSortedView(handle, { column: 3, dir: 'asc' })
+  check('BOOLEAN ascending puts false first', (await firstPage(boolAsc))[0][3] === 'false')
+  const timeAsc = await buildSortedView(handle, { column: 4, dir: 'asc' })
+  check('TIMESTAMP sorts chronologically',
+    (await firstPage(timeAsc))[0][4] === '2024-01-01 00:00:00', (await firstPage(timeAsc))[0][4])
+
+  console.log('\ncell detail through a view')
+  check('the identity view still reads from the file',
+    (await readViewCell(handle, identity, 0, 0)) === '1')
+  // The row index counts within the view: row 0 of a descending sort is the largest id.
+  check('a sorted view resolves the row the user sees',
+    (await readViewCell(handle, idDesc, 0, 0)) === '250')
+  check('a sorted view returns the untruncated value',
+    (await readViewCell(handle, nameAsc, 0, 1)) === 'user_1')
+  check('past the end of a sorted view is NULL',
+    (await readViewCell(handle, idDesc, 999, 0)) === 'NULL')
+  check('an unknown column is NULL', (await readViewCell(handle, idDesc, 0, 9)) === 'NULL')
 
   console.log('\nformatCell')
   check('Uint8Array is summarised', formatCell(new Uint8Array([1, 2, 3])) === '0x010203 (3 B)')

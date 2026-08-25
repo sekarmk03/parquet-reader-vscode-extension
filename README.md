@@ -18,11 +18,35 @@ the compression codecs in use, and the writer that produced it.
 
 ### Data tab
 
-- 100 rows per page, with row numbers and a sticky two-line header showing each column name
-  and its type
+- Rows per page is picked in the footer — 25, 50, 100, 250, 500 or 1000 — with row numbers and
+  a sticky two-line header showing each column name and its type
 - Numeric columns are right-aligned; `NULL` is rendered distinctly from an empty string
 - Nested columns (`STRUCT`, `LIST`, `MAP`, `VARIANT`) stay in a single column, rendered as JSON
 - Long values are shortened to 200 characters in the grid, so a page stays fast to render
+
+### Search within the page
+
+Type in the box above the table to keep only the rows that match and highlight the matches.
+It is case-insensitive and looks at every column.
+
+This searches the page you are looking at, not the whole file — the count beside the box says
+so. It runs entirely inside the view: nothing is sent to the extension, and no byte is read.
+
+### Column sorting
+
+Click a column header to cycle ascending → descending → back to file order.
+
+Sorting compares the values themselves rather than their printed form, so `9` sorts before `10`
+and timestamps sort chronologically. `NULL` sorts last in both directions, because it is the
+absence of a value rather than the smallest one.
+
+Nested columns (`STRUCT`, `LIST`, `MAP`, `VARIANT`) and repeated columns hold more than one value
+per row, so there is nothing single to order by. Their headers show a `not-allowed` cursor, and
+clicking one explains why in the toolbar rather than silently doing nothing.
+
+Sorting reads the whole file into memory, so it is capped by `parquetReader.sortCellBudget`
+(500,000 cells by default, counted as rows × columns). Beyond that limit the headers stop
+responding and explain the limit, rather than freezing the window on a file that will not fit.
 
 ### Cell detail
 
@@ -84,11 +108,27 @@ fall back to reading whole column chunks, which is correct but slower to open.
 
 ## Extension settings
 
-None. The viewer has nothing to configure.
+| Setting | Default | What it does |
+|---|---|---|
+| `parquetReader.pageSize` | `100` | Rows per page, 25 to 1000. Also set by the picker in the footer. Lowered automatically on wide files — see below. |
+| `parquetReader.sortCellBudget` | `500000` | Largest file column sorting will load, in cells (rows × columns). `0` turns sorting off. |
+
+Page size does not change how much of the file is read: the smallest unit Parquet can read is a
+data page, which is already larger than any page of rows, so 1000 rows costs the same bytes as
+100. What it does change is rendering, and that grows with rows × columns rather than with rows
+alone. So the effective page size is capped at roughly 20,000 cells: a 4-column file gets the
+full 1000 rows, a 60-column file gets 333. The footer says when the value was lowered.
+
+The **Rows per page** picker in the footer writes this same setting, so a choice made there
+sticks for the next file you open. Both settings take effect immediately in open tabs — changing
+the page size keeps whichever row was at the top of the page in view.
 
 ## Known limitations
 
-- Read-only. There is no sorting, filtering, or search yet.
+- Read-only. The viewer never writes back to your file.
+- Search covers the current page, not the whole file. Whole-file search is not implemented yet.
+- Sorting is limited to files under `parquetReader.sortCellBudget`, and to one column at a time.
+  There is no filtering or query support yet.
 - A `BYTE_ARRAY` column carrying no logical type is decoded as UTF-8 text by the underlying
   reader, so genuinely binary columns (hashes, blobs) display as unreadable text.
 - Presigned S3 URLs expire after one hour. Reopening re-signs automatically, because the

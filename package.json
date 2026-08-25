@@ -2,7 +2,7 @@
   "name": "parquet-reader",
   "displayName": "Parquet Reader",
   "description": "View .parquet files as a readable table with column summary",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "publisher": "sekarmk03",
   "license": "MIT",
   "icon": "icon.png",
@@ -39,14 +39,14 @@
   "contributes": {
     "commands": [
       {
-        "command": "parquetViewer.openUrl",
-        "title": "Open Parquet from URL…",
+        "command": "sekarmk03.parquetReader.openUrl",
+        "title": "Open Parquet from URL\u2026",
         "category": "Parquet"
       }
     ],
     "customEditors": [
       {
-        "viewType": "parquetViewer.table",
+        "viewType": "sekarmk03.parquetReader.table",
         "displayName": "Parquet Table",
         "selector": [
           {
@@ -58,7 +58,25 @@
         ],
         "priority": "default"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Parquet Reader",
+      "properties": {
+        "parquetReader.pageSize": {
+          "type": "number",
+          "default": 100,
+          "minimum": 25,
+          "maximum": 1000,
+          "markdownDescription": "Rows shown per page. Lowered automatically on files with many columns, because rendering cost grows with rows x columns rather than with rows alone."
+        },
+        "parquetReader.sortCellBudget": {
+          "type": "number",
+          "default": 500000,
+          "minimum": 0,
+          "markdownDescription": "Largest file that column sorting will load, counted in cells (rows x columns). Sorting holds every row in memory, so the limit is on cells, not rows. Set to `0` to turn sorting off entirely."
+        }
+      }
+    }
   },
   "scripts": {
     "build": "node esbuild.mjs",

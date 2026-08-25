@@ -2,7 +2,7 @@ import * as vscode from 'vscode'
 import { attachPanel } from './panel'
 import { isRemote, sourceLabel } from './source'
 
-const VIEW_TYPE = 'parquetViewer.table'
+const VIEW_TYPE = 'sekarmk03.parquetReader.table'
 
 export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
@@ -14,7 +14,7 @@ export function activate(context: vscode.ExtensionContext): void {
         webviewOptions: { retainContextWhenHidden: true },
       },
     ),
-    vscode.commands.registerCommand('parquetViewer.openUrl', () => openUrl(context.extensionUri)),
+    vscode.commands.registerCommand('sekarmk03.parquetReader.openUrl', () => openUrl(context.extensionUri)),
     // Local files come back through the custom editor; URL panels have only this.
     vscode.window.registerWebviewPanelSerializer(VIEW_TYPE, {
       async deserializeWebviewPanel(panel: vscode.WebviewPanel, state: { source?: string }) {
