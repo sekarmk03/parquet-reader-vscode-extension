@@ -5,6 +5,7 @@
   "version": "0.0.1",
   "publisher": "sekarmk03",
   "license": "MIT",
+  "icon": "icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/sekarmk03/parquet-reader-vscode-extension.git"
@@ -65,6 +66,7 @@
     "typecheck": "tsc --noEmit",
     "sample": "node test/make-sample.mjs",
     "demo": "node test/make-demo.mjs",
+    "icon": "node tools/make-icon.mjs columnar 256 icon.png",
     "smoke": "node esbuild.mjs --smoke && node dist/smoke.js",
     "package": "node esbuild.mjs --production && vsce package"
   },
