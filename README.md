@@ -8,6 +8,25 @@ file into memory.
 
 ## Features
 
+### Remote files over HTTPS and S3
+
+Run **Parquet: Open Parquet from URL…** from the Command Palette:
+
+![Command Palette entry](images/open-from-url-command.png)
+
+Then paste an `https://` or `s3://` URL:
+
+![URL input](images/open-from-url-input.png)
+
+- **`https://`** — the server must support HTTP range requests. If it does not, the viewer
+  says so instead of silently downloading the entire file.
+- **`s3://bucket/key.parquet`** — signed by shelling out to `aws s3 presign`, so your existing
+  AWS profile or SSO session does the signing and no credential ever passes through this
+  extension. Presigned `https://` URLs work directly, with no AWS CLI required.
+
+Remote files are read the same way as local ones: only the footer and the data pages you are
+actually looking at cross the network.
+
 ### Opens from the Explorer
 
 Double-click any `.parquet` or `.pq` file. No command to run, no conversion step. The viewer
@@ -63,25 +82,6 @@ payload, which is what keeps wide, deeply nested files responsive.
 One row per leaf column, using dotted paths for nested fields. For each column: physical type,
 logical type, nullability, null count, min, max, and compressed size summed across all row
 groups. Columns whose writer omitted statistics show `—` rather than a misleading zero.
-
-### Remote files over HTTPS and S3
-
-Run **Parquet: Open Parquet from URL…** from the Command Palette:
-
-![Command Palette entry](images/open-from-url-command.png)
-
-Then paste an `https://` or `s3://` URL:
-
-![URL input](images/open-from-url-input.png)
-
-- **`https://`** — the server must support HTTP range requests. If it does not, the viewer
-  says so instead of silently downloading the entire file.
-- **`s3://bucket/key.parquet`** — signed by shelling out to `aws s3 presign`, so your existing
-  AWS profile or SSO session does the signing and no credential ever passes through this
-  extension. Presigned `https://` URLs work directly, with no AWS CLI required.
-
-Remote files are read the same way as local ones: only the footer and the data pages you are
-actually looking at cross the network.
 
 ### Follows your theme
 
