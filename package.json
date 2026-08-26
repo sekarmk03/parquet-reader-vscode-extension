@@ -86,6 +86,8 @@
     "demo": "node test/make-demo.mjs",
     "icon": "node tools/make-icon.mjs columnar 256 icon.png",
     "smoke": "node esbuild.mjs --smoke && node dist/smoke.js",
+    "verify": "npm run typecheck && npm run smoke",
+    "release": "npm run verify && npm run package",
     "package": "node esbuild.mjs --production && vsce package"
   },
   "dependencies": {
