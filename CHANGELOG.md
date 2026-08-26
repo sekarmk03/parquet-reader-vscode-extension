@@ -1,5 +1,10 @@
 # Change Log
 
+## 0.1.1
+**Page Content.** Update README page content. Place description of the main feature:
+open parquet file from remote server to the beginning of the features section. Make it
+more visible.
+
 ## 0.1.0
 
 Reading tools for the Data tab. Sorting is deliberately limited this release — see below.

@@ -2,7 +2,7 @@
   "name": "parquet-reader",
   "displayName": "Parquet Reader",
   "description": "View .parquet files as a readable table with column summary",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "sekarmk03",
   "license": "MIT",
   "icon": "icon.png",
@@ -40,7 +40,7 @@
     "commands": [
       {
         "command": "sekarmk03.parquetReader.openUrl",
-        "title": "Open Parquet from URL\u2026",
+        "title": "Open Parquet from URL…",
         "category": "Parquet"
       }
     ],
